@@ -5,6 +5,36 @@ import hashlib
 import pdb
 from datetime import datetime, timedelta
 
+def valid_budget(date_str,value,period_start_str,period_end_str,currency,default_currency):
+    #Try to parse the date string. If failure, invalid budget.
+    try:
+        date = datetime.strptime(date_str,'%Y-%m-%d')
+    except ValueError:
+        return False
+    
+    #If value is None, or zero or less, invalid budget
+    if value is None or value<=0:
+        return False
+    
+    #Try to parse the period start date string. If failure, invalid budget.
+    try:
+        period_start = datetime.strptime(period_start_str,'%Y-%m-%d')
+    except ValueError:
+        return False
+    
+    #Try to parse the period end date string. If failure, invalid budget.
+    try:
+        period_end = datetime.strptime(period_end_str,'%Y-%m-%d')
+    except ValueError:
+        return False
+    
+    #If currency is None or blank, and default_currency is None or blank, then invalid budget
+    if currency is None or currency=="":
+        if default_currency is None or default_currency=="":
+            return False
+    
+    return True
+
 def generate_md5(data):
     """
     Method to generate a (nearly) unique hash for a given chunk of data.
@@ -65,68 +95,59 @@ def extract_activity(url):
     # Build the request
     r = requests.get(url)
     activity = r.json()
-    
-    valid = True
-    
+
     if len(activity['activity_dates'])>0:
         planned_start = [date['iso_date'] for date in activity['activity_dates'] if date['type']['code']=='1']
         actual_start = [date['iso_date'] for date in activity['activity_dates'] if date['type']['code']=='2']
         planned_end = [date['iso_date'] for date in activity['activity_dates'] if date['type']['code']=='3']
         actual_end = [date['iso_date'] for date in activity['activity_dates'] if date['type']['code']=='4']
-        
-        #Missing either a start or an end, therefore invalid
-        if len(planned_start+actual_start)<1 or len(planned_end+actual_end)<1:
-            valid = valid and False
             
         #Parse any available dates
         dates = {}
         if len(planned_start)>0:
             try:
                 parsed_planned_start = datetime.strptime(planned_start[0],'%Y-%m-%d')
-                dates['planned_start'] = parsed_planned_start
+                dates['activity_planned_start'] = parsed_planned_start
             except ValueError:
-                valid = valid and False
+                pass
         if len(actual_start)>0:
             try:
                 parsed_actual_start = datetime.strptime(actual_start[0],'%Y-%m-%d')
-                dates['actual_start'] = parsed_actual_start
+                dates['activity_actual_start'] = parsed_actual_start
             except ValueError:
-                valid = valid and False
+                pass
         if len(planned_end)>0:
             try:
                 parsed_planned_end = datetime.strptime(planned_end[0],'%Y-%m-%d')
-                dates['planned_end'] = parsed_planned_end
+                dates['activity_planned_end'] = parsed_planned_end
             except ValueError:
-                valid = valid and False
+                pass
         if len(actual_end)>0:
             try:
                 parsed_actual_end = datetime.strptime(actual_end[0],'%Y-%m-%d')
-                dates['actual_end'] = parsed_actual_end
+                dates['activity_actual_end'] = parsed_actual_end
             except ValueError:
-                valid = valid and False
+                pass
         
         #If the timedelta is greater than 365 days, it's invalid
         #Or if start is greater than end
-        if 'planned_start' in dates and 'planned_end' in dates:
-            if dates['planned_end']-dates['planned_start']>timedelta(365):
-                valid = valid and False
-            if dates['planned_end']<dates['planned_start']:
-                valid = valid and False
-        
-        if 'actual_start' in dates and 'actual_end' in dates:
-            if dates['actual_end']-dates['actual_start']>timedelta(365):
-                valid = valid and False
-            if dates['actual_end']<dates['actual_start']:
-                valid = valid and False
-                
-        if 'actual_start' in dates and 'actual_end' not in dates and 'planned_end' in dates:
-            if dates['planned_end']-dates['actual_start']>timedelta(365):
-                valid = valid and False
-            if dates['planned_end']<dates['actual_start']:
-                valid = valid and False
-    #Missing any date, therefore invalid
-    else:
-        valid = valid and False
+        # if 'planned_start' in dates and 'planned_end' in dates:
+        #     if dates['planned_end']-dates['planned_start']>timedelta(365):
+        #         valid = valid and False
+        #     if dates['planned_end']<dates['planned_start']:
+        #         valid = valid and False
+        # 
+        # if 'actual_start' in dates and 'actual_end' in dates:
+        #     if dates['actual_end']-dates['actual_start']>timedelta(365):
+        #         valid = valid and False
+        #     if dates['actual_end']<dates['actual_start']:
+        #         valid = valid and False
+        #         
+        # if 'actual_start' in dates and 'actual_end' not in dates and 'planned_end' in dates:
+        #     if dates['planned_end']-dates['actual_start']>timedelta(365):
+        #         valid = valid and False
+        #     if dates['planned_end']<dates['actual_start']:
+        #         valid = valid and False
     
     #Is there a default or budget currency?
     currency = ""
@@ -134,18 +155,15 @@ def extract_activity(url):
     if activity['aggregations']['activity']['budget_currency'] is None:
         if len(default_currencies)>0:
             currency = default_currencies[0]
-        else:
-            valid = valid and False
     else:
         currency = activity['aggregations']['activity']['budget_currency']
         
     value = activity['aggregations']['activity']['budget_value']
-    if value is None or value<=0:
-        valid = valid and False
     
-    if valid:
+    if value is None or value<=0:
+        #Activity level results
         result = {}
-        all_date_keys = ['planned_start','actual_start','planned_end','actual_end']
+        all_date_keys = ['activity_planned_start','activity_actual_start','activity_planned_end','activity_actual_end']
         for key in all_date_keys:
             if key not in dates:
                 result[key] = ""
@@ -294,37 +312,38 @@ def extract_activity(url):
         except (KeyError,IndexError,TypeError):
             result['default_tied_status'] = ""
             
+        #Budget level results
         try:
-            budget_values = ";".join([str(item['value']['value']) for item in activity['budgets']])
+            budget_values = [item['value']['value'] for item in activity['budgets']]
         except (KeyError,IndexError,TypeError):
-            budget_values = ""
-        result['budget_values'] = budget_values
+            budget_values = []
         try:
-            budget_dates = ";".join([str(item['value']['date']) for item in activity['budgets']])
+            budget_dates = [item['value']['date'] for item in activity['budgets']]
         except (KeyError,IndexError,TypeError):
-            budget_dates = ""
-        result['budget_dates'] = budget_dates
+            budget_dates = []
         try:
-            budget_currencies = ";".join([str(item['value']['currency']['code']) for item in activity['budgets']])
+            budget_currencies = [item['value']['currency']['code'] for item in activity['budgets']]
         except (KeyError,IndexError,TypeError):
-            budget_currencies = ""
-        result['budget_currencies'] = budget_currencies
+            budget_currencies = []
         try:
-            budget_period_ends = ";".join([str(item['period_end']) for item in activity['budgets']])
+            budget_period_ends = [item['period_end'] for item in activity['budgets']]
         except (KeyError,IndexError,TypeError):
-            budget_period_ends = ""
-        result['budget_period_ends'] = budget_period_ends
+            budget_period_ends = []
         try:
-            budget_period_starts = ";".join([str(item['period_start']) for item in activity['budgets']])
+            budget_period_starts = [item['period_start'] for item in activity['budgets']]
         except (KeyError,IndexError,TypeError):
-            budget_period_starts = ""
-        result['budget_period_starts'] = budget_period_starts
+            budget_period_starts = []
         try:
-            budget_types = ";".join([str(item['type']['code']) for item in activity['budgets']])
+            budget_types = [item['type']['code'] for item in activity['budgets']]
         except (KeyError,IndexError,TypeError):
-            budget_types = ""
-        result['budget_types'] = budget_types
-        return result
+            budget_types = []
+         
+        data_lengths = [len(budget_values),len(budget_dates),len(budget_currencies),len(budget_period_ends),len(budget_period_starts),len(budget_types)]    
+        results = []
+        for i in range(0,max(data_lengths)):
+            budget_item = result.deepcopy()
+
+        return results
     else:
         return False
 
