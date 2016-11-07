@@ -4,6 +4,7 @@ import sys
 import hashlib
 import pdb
 from datetime import datetime, timedelta
+from copy import deepcopy
 
 def valid_budget(date_str,value,period_start_str,period_end_str,currency,default_currency):
     #Try to parse the date string. If failure, invalid budget.
@@ -12,8 +13,8 @@ def valid_budget(date_str,value,period_start_str,period_end_str,currency,default
     except ValueError:
         return False
     
-    #If value is None, or zero or less, invalid budget
-    if value is None or value<=0:
+    #If value is None, or zero, or blank, invalid budget
+    if value is None or value==0 or value=="":
         return False
     
     #Try to parse the period start date string. If failure, invalid budget.
@@ -26,6 +27,14 @@ def valid_budget(date_str,value,period_start_str,period_end_str,currency,default
     try:
         period_end = datetime.strptime(period_end_str,'%Y-%m-%d')
     except ValueError:
+        return False
+    
+    #If the budget line is longer than 1 year, invalid
+    if period_end-period_start>timedelta(365):
+        return False
+
+    #If the end is before the beginning, invalid.
+    if period_end<period_start:
         return False
     
     #If currency is None or blank, and default_currency is None or blank, then invalid budget
@@ -66,10 +75,11 @@ def oipa_recursive_url_getter(url, filename, current_count=0, valid_count=0):
         extraction = extract_activity(activity['url'])
         if extraction:
             valid_count = valid_count + 1
-            extraction['url'] = activity['url']
-            extraction_hash = generate_md5(str(extraction))
-            extraction['hash'] = extraction_hash
-            df = pd.DataFrame([extraction])
+            for budget_item in extraction:
+                budget_item['url'] = activity['url']
+                budget_hash = generate_md5(str(budget_item))
+                budget_item['hash'] = budget_hash
+            df = pd.DataFrame(extraction)
             now = datetime.now()
             if valid_count==1:
                 df.to_csv(filename,index=False,sep="|")
@@ -102,7 +112,7 @@ def extract_activity(url):
         planned_end = [date['iso_date'] for date in activity['activity_dates'] if date['type']['code']=='3']
         actual_end = [date['iso_date'] for date in activity['activity_dates'] if date['type']['code']=='4']
             
-        #Parse any available dates
+        #Parse any available dates, ensuring real ISO
         dates = {}
         if len(planned_start)>0:
             try:
@@ -128,39 +138,24 @@ def extract_activity(url):
                 dates['activity_actual_end'] = parsed_actual_end
             except ValueError:
                 pass
-        
-        #If the timedelta is greater than 365 days, it's invalid
-        #Or if start is greater than end
-        # if 'planned_start' in dates and 'planned_end' in dates:
-        #     if dates['planned_end']-dates['planned_start']>timedelta(365):
-        #         valid = valid and False
-        #     if dates['planned_end']<dates['planned_start']:
-        #         valid = valid and False
-        # 
-        # if 'actual_start' in dates and 'actual_end' in dates:
-        #     if dates['actual_end']-dates['actual_start']>timedelta(365):
-        #         valid = valid and False
-        #     if dates['actual_end']<dates['actual_start']:
-        #         valid = valid and False
-        #         
-        # if 'actual_start' in dates and 'actual_end' not in dates and 'planned_end' in dates:
-        #     if dates['planned_end']-dates['actual_start']>timedelta(365):
-        #         valid = valid and False
-        #     if dates['planned_end']<dates['actual_start']:
-        #         valid = valid and False
-    
-    #Is there a default or budget currency?
-    currency = ""
-    default_currencies = [org['organisation']['default_currency'] for org in activity['reporting_organisations']]
-    if activity['aggregations']['activity']['budget_currency'] is None:
-        if len(default_currencies)>0:
-            currency = default_currencies[0]
-    else:
+            
+    #Is there a default currency?
+    try:
+        default_currency = [org['organisation']['default_currency'] for org in activity['reporting_organisations']][0]
+    except (KeyError,IndexError,TypeError):
+        default_currency = ""
+    #Budget currency?
+    try:
         currency = activity['aggregations']['activity']['budget_currency']
+    except (KeyError,IndexError,TypeError):
+        currency = ""
         
-    value = activity['aggregations']['activity']['budget_value']
+    try:
+        value = activity['aggregations']['activity']['budget_value']
+    except (KeyError,IndexError,TypeError):
+        value = None
     
-    if value is None or value<=0:
+    if value is not None:
         #Activity level results
         result = {}
         all_date_keys = ['activity_planned_start','activity_actual_start','activity_planned_end','activity_actual_end']
@@ -214,49 +209,78 @@ def extract_activity(url):
         result['participating_org_codes'] = participating_codes
         
         try:
-            recipient_countries = ";".join([str(country['country']['name']) for country in activity['recipient_countries']])
+            recipient_country_names = [country['country']['name'] for country in activity['recipient_countries']]
         except (KeyError,IndexError,TypeError):
-            recipient_countries = ""
-        result['recipient_countries'] = recipient_countries
+            recipient_country_names = []
         try:
-            recipient_country_percentages = ";".join([str(country['percentage']) for country in activity['recipient_countries']])
+            recipient_country_codes = [country['country']['code'] for country in activity['recipient_countries']]
         except (KeyError,IndexError,TypeError):
-            recipient_country_percentages = ""
-        result['recipient_country_percentages'] = recipient_country_percentages
+            recipient_country_codes = []
+        try:
+            recipient_country_percentages = [country['percentage'] for country in activity['recipient_countries']]
+        except (KeyError,IndexError,TypeError):
+            recipient_country_percentages = []
+        
+        try:
+            recipient_region_names = [region['region']['name'] for region in activity['recipient_regions']]
+        except (KeyError,IndexError,TypeError):
+            recipient_region_names = []
+        try:
+            recipient_region_codes = [region['region']['code'] for region in activity['recipient_regions']]
+        except (KeyError,IndexError,TypeError):
+            recipient_region_codes = []
+        try:
+            recipient_region_percentages = [region['percentage'] for region in activity['recipient_regions']]
+        except (KeyError,IndexError,TypeError):
+            recipient_region_percentages = []
             
-        #Flying a little blind here because I'm having trouble finding an example with a region
-        try:
-            # if len(activity['recipient_regions'])>0:
-            #     pdb.set_trace()
-            recipient_regions = ";".join([str(region['region']['name']) for region in activity['recipient_regions']])
-        except (KeyError,IndexError,TypeError):
-            recipient_regions = ""
-        result['recipient_regions'] = recipient_regions
-        try:
-            recipient_region_percentages = ";".join([str(region['percentage']) for region in activity['recipient_regions']])
-        except (KeyError,IndexError,TypeError):
-            recipient_region_percentages = ""
-        result['recipient_region_percentages'] = recipient_region_percentages
+        if len(recipient_country_names+recipient_region_names)==1:
+            recipient_names_concat = recipient_country_names+recipient_region_names
+            recipient_names = recipient_names_concat[0]
+            recipient_codes_concat = recipient_country_codes+recipient_region_codes
+            recipient_codes = recipient_codes_concat[0]
+            recipient_percentages="100"
+        elif len(recipient_country_names+recipient_region_names)==0:
+            recipient_names = ""
+            recipient_codes = ""
+            recipient_percentages = ""
+        elif len(recipient_country_names+recipient_region_names)>1:
+            recipient_percentages_concat = [percentage for percentage in recipient_country_percentages+recipient_region_percentages if percentage is not None]
+            if sum(recipient_percentages_concat)>110 or sum(recipient_percentages_concat)<90:
+                #Just go with the countries
+                recipient_names = ";".join(recipient_country_names)
+                recipient_codes = ";".join(recipient_country_codes)
+                recipient_percentages = ";".join([str(perc) for perc in recipient_country_percentages])
+            else:
+                recipient_percentages = ";".join(recipient_percentages_concat)
+                recipient_names_concat = recipient_country_names+recipient_region_names
+                recipient_names = ";".join(recipient_names_concat)
+                recipient_codes_concat = recipient_country_codes+recipient_region_codes
+                recipient_codes = ";".join(recipient_codes_concat)
+            
+        result['recipient_names'] = recipient_names
+        result['recipient_codes'] = recipient_codes
+        result['recipient_percentages'] = recipient_percentages
         
-        #At the moment, no way to compare percentages unless we introduce a region-lookup by country code
         
+        #If vocabulary is null, DAC is assumed
         try:
-            sector_sum = sum([float(sector['percentage']) for sector in activity['sectors'] if sector['vocabulary']['code'] in ['1','2']])
+            sector_sum = sum([float(sector['percentage']) for sector in activity['sectors'] if sector['vocabulary']['code'] in ['1','2',"",None]])
             if sector_sum<90 or sector_sum>110:
                 data_error_flag="99880"
-                data_error_flag_percentage="None"
+                data_error_flag_percentage="100"
             else:
                 data_error_flag=False
         except (KeyError,IndexError,TypeError):
             data_error_flag="99880"
-            data_error_flag_percentage="None"
+            data_error_flag_percentage="100"
         
         try:
             sector_codes = ";".join([str(sector['sector']['code']) for sector in activity['sectors'] if sector['vocabulary']['code'] in ['1','2']])
         except (KeyError,IndexError,TypeError):
             sector_codes = ""
         if data_error_flag:
-            result['sector_codes'] = ";".join([sector_codes,data_error_flag])
+            result['sector_codes'] = data_error_flag
         else:
             result['sector_codes'] = sector_codes
         try:
@@ -264,25 +288,19 @@ def extract_activity(url):
         except (KeyError,IndexError,TypeError):
             sector_percentages = ""
         if data_error_flag:
-            result['sector_percentages'] = ";".join([sector_percentages,data_error_flag_percentage])
+            result['sector_percentages'] = data_error_flag_percentage
         else:
             result['sector_percentages'] = sector_percentages
             
         #Again, no test case for this, so it needs testing
+        #DAC is vocab 1 or blank
         try:
-            # if len(activity['policy_markers'])>0:
-            #     pdb.set_trace()
-            policy_marker_vocabularies = ";".join([str(marker['vocabulary']) for marker in activity['policy_markers']])
-        except (KeyError,IndexError,TypeError):
-            policy_marker_vocabularies = ""
-        result['policy_marker_vocabularies'] = policy_marker_vocabularies
-        try:
-            policy_marker_codes = ";".join([str(marker['code']) for marker in activity['policy_markers']])
+            policy_marker_codes = ";".join([str(marker['code']) for marker in activity['policy_markers'] if marker['vocabulary'] in ['1',None]])
         except (KeyError,IndexError,TypeError):
             policy_marker_codes = ""
         result['policy_marker_codes'] = policy_marker_codes
         try:
-            policy_marker_sig = ";".join([str(marker['significance']) for marker in activity['policy_markers']])
+            policy_marker_sig = ";".join([str(marker['significance']) for marker in activity['policy_markers'] if marker['vocabulary'] in ['1',None]])
         except (KeyError,IndexError,TypeError):
             policy_marker_sig = ""
         result['policy_marker_sig'] = policy_marker_sig
@@ -338,12 +356,44 @@ def extract_activity(url):
         except (KeyError,IndexError,TypeError):
             budget_types = []
          
-        data_lengths = [len(budget_values),len(budget_dates),len(budget_currencies),len(budget_period_ends),len(budget_period_starts),len(budget_types)]    
         results = []
-        for i in range(0,max(data_lengths)):
-            budget_item = result.deepcopy()
-
-        return results
+        for i in range(0,len(budget_values)):
+            try:
+                budget_date = budget_dates[i]
+            except IndexError:
+                budget_date = ""
+            try:
+                budget_value = budget_values[i]
+            except IndexError:
+                budget_value = ""
+            try:
+                budget_period_start = budget_period_starts[i]
+            except IndexError:
+                budget_period_start = ""
+            try:
+                budget_period_end = budget_period_ends[i]
+            except IndexError:
+                budget_period_end = ""
+            try:
+                budget_currency = budget_currencies[i]
+            except IndexError:
+                budget_currency = ""
+            budget_valid = valid_budget(budget_date,budget_value,budget_period_start,budget_period_end,budget_currency,default_currency)
+            if budget_valid:
+                budget_item = deepcopy(result)
+                budget_item['budget_date'] = budget_date
+                budget_item['budget_value'] = budget_value
+                budget_item['budget_period_start'] = budget_period_start
+                budget_item['budget_period_ends'] = budget_period_end
+                if budget_currency == "":
+                    budget_item['budget_currency'] = default_currency
+                else:
+                    budget_item['budget_currency'] = budget_currency
+                results.append(budget_item)
+        if len(results)>0:
+            return results
+        else:
+            return False
     else:
         return False
 
