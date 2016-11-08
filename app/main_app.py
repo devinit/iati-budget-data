@@ -62,7 +62,20 @@ def oipa_recursive_url_getter(url, filename, current_count=0, valid_count=0):
         secondary_flags = [org['secondary_reporter'] for org in activity['reporting_organisations']]
         if sum(secondary_flags) == len(secondary_flags):
             next
-        
+            
+        #Exclude invalid IATI identifiers
+        try:
+            org_code = [org['organisation']['organisation_identifier'] for org in activity['reporting_organisations']][0]
+        except (KeyError,IndexError,TypeError):
+            org_code = ""
+        try:
+            identifier = activity['iati_identifier']
+        except (KeyError,IndexError,TypeError):
+            identifier = ""
+
+        if identifier[:len(org_code)]!=org_code:
+            next
+            
         extraction = extract_activity(activity['url'])
         if extraction:
             valid_count = valid_count + 1
