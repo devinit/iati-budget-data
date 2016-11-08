@@ -80,7 +80,7 @@ def oipa_recursive_url_getter(url, filename, current_count=0, valid_count=0):
         if extraction:
             valid_count = valid_count + 1
             for budget_item in extraction:
-                budget_item['url'] = activity['url']
+                budget_item['oipa-activity-url'] = activity['url']
             df = pd.DataFrame(extraction)
             now = datetime.now()
             if valid_count==1:
@@ -146,12 +146,7 @@ def extract_activity(url):
         default_currency = [org['organisation']['default_currency'] for org in activity['reporting_organisations']][0]
     except (KeyError,IndexError,TypeError):
         default_currency = ""
-    #Budget currency?
-    try:
-        currency = activity['aggregations']['activity']['budget_currency']
-    except (KeyError,IndexError,TypeError):
-        currency = ""
-        
+
     try:
         value = activity['aggregations']['activity']['budget_value']
     except (KeyError,IndexError,TypeError):
@@ -160,38 +155,39 @@ def extract_activity(url):
     if value is not None:
         #Activity level results
         result = {}
+        
+        result['iati-activity_default-currency'] = default_currency
+        
         if 'activity_actual_start' in dates:
-            result['activity_date_start'] = dates['activity_actual_start'].strftime('%Y-%m-%d')
+            result['activity-date_start'] = dates['activity_actual_start'].strftime('%Y-%m-%d')
         elif 'activity_planned_start' in dates:
-            result['activity_date_start'] = dates['activity_planned_start'].strftime('%Y-%m-%d')
+            result['activity-date_start'] = dates['activity_planned_start'].strftime('%Y-%m-%d')
         else:
-            result['activity_date_start'] = ""
+            result['activity-date_start'] = ""
             
         if 'activity_actual_end' in dates:
-            result['activity_date_end'] = dates['activity_actual_end'].strftime('%Y-%m-%d')
+            result['activity-date_end'] = dates['activity_actual_end'].strftime('%Y-%m-%d')
         elif 'activity_planned_end' in dates:
-            result['activity_date_end'] = dates['activity_planned_end'].strftime('%Y-%m-%d')
+            result['activity-date_end'] = dates['activity_planned_end'].strftime('%Y-%m-%d')
         else:
-            result['activity_date_end'] = ""
-
-        result['currency'] = currency
+            result['activity-date_end'] = ""
 
         try:
-            result['iati_identifier'] = str(activity['iati_identifier'])
+            result['iati-identifier'] = str(activity['iati_identifier'])
         except (KeyError,IndexError,TypeError):
-            result['iati_identifier'] = ""
+            result['iati-identifier'] = ""
             
         try:
             reporting_codes = ";".join([str(org['organisation']['organisation_identifier']) for org in activity['reporting_organisations']])
         except (KeyError,IndexError,TypeError):
             reporting_codes = ""
-        result['reporting_org_codes'] = reporting_codes
+        result['reporting-org_ref'] = reporting_codes
         
         try:
             reporting_names = ";".join([str(org['organisation']['primary_name']) for org in activity['reporting_organisations']])
         except (KeyError,IndexError,TypeError):
             reporting_names = ""
-        result['reporting_org_names'] = reporting_names
+        result['reporting-org_name'] = reporting_names
         
         try:
             #Try and grab the English title
@@ -210,13 +206,13 @@ def extract_activity(url):
             participating_names = ";".join([str(org['narratives'][0]['text']) for org in activity['participating_organisations'] if org['role']['name']=="Implementing"])
         except (KeyError,IndexError,TypeError):
             participating_names = ""
-        result['participating_org_names'] = participating_names
+        result['implementing-org_name'] = participating_names
             
         try:
             participating_codes = ";".join([str(org['ref']) for org in activity['participating_organisations'] if org['role']['name']=="Implementing"])
         except (KeyError,IndexError,TypeError):
             participating_codes = ""
-        result['participating_org_codes'] = participating_codes
+        result['implementing-org_ref'] = participating_codes
         
         try:
             recipient_country_names = [country['country']['name'] for country in activity['recipient_countries']]
@@ -268,9 +264,9 @@ def extract_activity(url):
                 recipient_codes_concat = recipient_country_codes+recipient_region_codes
                 recipient_codes = ";".join(recipient_codes_concat)
             
-        result['recipient_names'] = recipient_names
-        result['recipient_codes'] = recipient_codes
-        result['recipient_percentages'] = recipient_percentages
+        result['recipient_name'] = recipient_names
+        result['recipient_code'] = recipient_codes
+        result['recipient_percentage'] = recipient_percentages
         
         
         #If vocabulary is null, DAC is assumed
@@ -290,17 +286,17 @@ def extract_activity(url):
         except (KeyError,IndexError,TypeError):
             sector_codes = ""
         if data_error_flag:
-            result['sector_codes'] = data_error_flag
+            result['sector_code'] = data_error_flag
         else:
-            result['sector_codes'] = sector_codes
+            result['sector_code'] = sector_codes
         try:
             sector_percentages = ";".join([str(sector['percentage']) for sector in activity['sectors'] if sector['vocabulary']['code'] in ['1','2']])
         except (KeyError,IndexError,TypeError):
             sector_percentages = ""
         if data_error_flag:
-            result['sector_percentages'] = data_error_flag_percentage
+            result['sector_percentage'] = data_error_flag_percentage
         else:
-            result['sector_percentages'] = sector_percentages
+            result['sector_percentage'] = sector_percentages
             
         #Again, no test case for this, so it needs testing
         #DAC is vocab 1 or blank
@@ -308,37 +304,37 @@ def extract_activity(url):
             policy_marker_codes = ";".join([str(marker['code']) for marker in activity['policy_markers'] if marker['vocabulary'] in ['1',None]])
         except (KeyError,IndexError,TypeError):
             policy_marker_codes = ""
-        result['policy_marker_codes'] = policy_marker_codes
+        result['policy-marker_code'] = policy_marker_codes
         try:
             policy_marker_sig = ";".join([str(marker['significance']) for marker in activity['policy_markers'] if marker['vocabulary'] in ['1',None]])
         except (KeyError,IndexError,TypeError):
             policy_marker_sig = ""
-        result['policy_marker_sig'] = policy_marker_sig
+        result['policy-marker_significance'] = policy_marker_sig
         
         try:
-            result['collaboration_type'] = str(activity['collaboration_type']['code'])
+            result['collaboration-type_code'] = str(activity['collaboration_type']['code'])
         except (KeyError,IndexError,TypeError):
-            result['collaboration_type'] = ""
+            result['collaboration-type_code'] = ""
             
         try:
-            result['default_flow_type'] = str(activity['default_flow_type']['code'])
+            result['default-flow-type'] = str(activity['default_flow_type']['code'])
         except (KeyError,IndexError,TypeError):
-            result['default_flow_type'] = ""
+            result['default-flow-type'] = ""
             
         try:
-            result['default_finance_type'] = str(activity['default_finance_type']['code'])
+            result['default-finance-type'] = str(activity['default_finance_type']['code'])
         except (KeyError,IndexError,TypeError):
-            result['default_finance_type'] = ""
+            result['default-finance-type'] = ""
             
         try:
-            result['default_aid_type'] = str(activity['default_aid_type']['code'])
+            result['default-aid-type'] = str(activity['default_aid_type']['code'])
         except (KeyError,IndexError,TypeError):
-            result['default_aid_type'] = ""
+            result['default-aid-type'] = ""
             
         try:
-            result['default_tied_status'] = str(activity['default_tied_status']['code'])
+            result['default-tied-status'] = str(activity['default_tied_status']['code'])
         except (KeyError,IndexError,TypeError):
-            result['default_tied_status'] = ""
+            result['default-tied-status'] = ""
             
         #Budget level results
         try:
@@ -391,14 +387,14 @@ def extract_activity(url):
             budget_valid = valid_budget(budget_date,budget_value,budget_period_start,budget_period_end,budget_currency,default_currency)
             if budget_valid:
                 budget_item = deepcopy(result)
-                budget_item['budget_date'] = budget_date
+                budget_item['budget_value_value-date'] = budget_date
                 budget_item['budget_value'] = budget_value
-                budget_item['budget_period_start'] = budget_period_start
-                budget_item['budget_period_ends'] = budget_period_end
+                budget_item['budget_period-start_iso-date'] = budget_period_start
+                budget_item['budget_period-end_iso-date'] = budget_period_end
                 if budget_currency == "":
-                    budget_item['budget_currency'] = default_currency
+                    budget_item['budget_value_currency'] = default_currency
                 else:
-                    budget_item['budget_currency'] = budget_currency
+                    budget_item['budget_value_currency'] = budget_currency
                 results.append(budget_item)
         if len(results)>0:
             return results
