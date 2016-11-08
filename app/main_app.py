@@ -44,15 +44,6 @@ def valid_budget(date_str,value,period_start_str,period_end_str,currency,default
     
     return True
 
-def generate_md5(data):
-    """
-    Method to generate a (nearly) unique hash for a given chunk of data.
-    """
-    data = data.encode('UTF-8')
-    hash_md5 = hashlib.md5()
-    hash_md5.update(data)
-    return hash_md5.hexdigest()
-
 def oipa_recursive_url_getter(url, filename, current_count=0, valid_count=0):
     """
     High level method for extracting activity budgets from OIPA
@@ -77,8 +68,6 @@ def oipa_recursive_url_getter(url, filename, current_count=0, valid_count=0):
             valid_count = valid_count + 1
             for budget_item in extraction:
                 budget_item['url'] = activity['url']
-                budget_hash = generate_md5(str(budget_item))
-                budget_item['hash'] = budget_hash
             df = pd.DataFrame(extraction)
             now = datetime.now()
             if valid_count==1:
