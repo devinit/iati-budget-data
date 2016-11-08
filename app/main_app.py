@@ -175,7 +175,7 @@ def extract_activity(url):
             result['activity_date_end'] = ""
 
         result['currency'] = currency
-        result['total_value'] = value
+
         try:
             result['iati_identifier'] = str(activity['iati_identifier'])
         except (KeyError,IndexError,TypeError):
