@@ -160,12 +160,20 @@ def extract_activity(url):
     if value is not None:
         #Activity level results
         result = {}
-        all_date_keys = ['activity_planned_start','activity_actual_start','activity_planned_end','activity_actual_end']
-        for key in all_date_keys:
-            if key not in dates:
-                result[key] = ""
-            else:
-                result[key] = dates[key].strftime('%Y-%m-%d')
+        if 'activity_actual_start' in dates:
+            result['activity_date_start'] = dates['activity_actual_start'].strftime('%Y-%m-%d')
+        elif 'activity_planned_start' in dates:
+            result['activity_date_start'] = dates['activity_planned_start'].strftime('%Y-%m-%d')
+        else:
+            result['activity_date_start'] = ""
+            
+        if 'activity_actual_end' in dates:
+            result['activity_date_end'] = dates['activity_actual_end'].strftime('%Y-%m-%d')
+        elif 'activity_planned_end' in dates:
+            result['activity_date_end'] = dates['activity_planned_end'].strftime('%Y-%m-%d')
+        else:
+            result['activity_date_end'] = ""
+
         result['currency'] = currency
         result['total_value'] = value
         try:
