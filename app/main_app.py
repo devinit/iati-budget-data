@@ -1,16 +1,16 @@
 import requests
 import pandas as pd
 import sys
-import hashlib
 import pdb
 from datetime import datetime, timedelta
 from copy import deepcopy
+import json
 
 def valid_budget(date_str,value,period_start_str,period_end_str,currency,default_currency):
     #Try to parse the date string. If failure, invalid budget.
     try:
         date = datetime.strptime(date_str,'%Y-%m-%d')
-    except ValueError:
+    except (ValueError,TypeError):
         return False
     
     #If value is None, or zero, or blank, invalid budget
@@ -20,13 +20,13 @@ def valid_budget(date_str,value,period_start_str,period_end_str,currency,default
     #Try to parse the period start date string. If failure, invalid budget.
     try:
         period_start = datetime.strptime(period_start_str,'%Y-%m-%d')
-    except ValueError:
+    except (ValueError,TypeError):
         return False
     
     #Try to parse the period end date string. If failure, invalid budget.
     try:
         period_end = datetime.strptime(period_end_str,'%Y-%m-%d')
-    except ValueError:
+    except (ValueError,TypeError):
         return False
     
     #If the budget line is longer than 1 year, invalid
@@ -56,11 +56,14 @@ def oipa_url_getter(url, filename):
     current_count=0
     valid_count=0
     
+    failed_pages = []
+    
     invalid_urls = ['null','None',None]
-    while r.json()['next'] not in invalid_urls:
-
+    next_url = r.json()['next']
+    activities = r.json()['results']
+    while next_url not in invalid_urls:
         # extract activity URLs and store in the list
-        for activity in r.json()['results']:
+        for activity in activities:
             current_count = current_count + 1
             # Exclude automatically if all of the reporters are secondary
             # Unfortunately, it's the only attribute we can exclude before delving deeper
@@ -86,7 +89,11 @@ def oipa_url_getter(url, filename):
             if extraction:
                 valid_count = valid_count + 1
                 for budget_item in extraction:
-                    budget_item['oipa-activity-url'] = activity['url']
+                    if url in budget_item:
+                        activity_url = activity['url']
+                    else:
+                        activity_url = "https://www.oipa.nl/api/activities/%s/?format=json" % budget_item['iati-identifier'].replace("/","-")
+                    budget_item['oipa-activity-url'] = activity_url
                 df = pd.DataFrame(extraction)
                 now = datetime.now()
                 if valid_count==1:
@@ -94,13 +101,50 @@ def oipa_url_getter(url, filename):
                 else:
                     df.to_csv(filename,mode="a",header=False,index=False,sep="|")
     
+        #Find the current page index
+        page_index = next_url.find("&page=")
+        #If it doesn't exist, we must be on page 1
+        if page_index==-1:
+            current_page = 1
+        #Else, account for the length of the search string
+        else:
+            page_index = page_index + 6
+            current_page_first_half = next_url[page_index:]
+            end_index = current_page_first_half.find("&")
+            if end_index==-1:
+                current_page = int(current_page_first_half)
+            else:
+                current_page = int(current_page_first_half[:end_index])
         total = r.json()['count']
-        sys.stdout.write('%d percent complete | %d of %d\r' % (current_count / total * 100.000, current_count, total))
+        sys.stdout.write('%d percent complete | %d of %d | %d failed pages\r' % (current_count / total * 100.000, current_count, total,len(failed_pages)))
         sys.stdout.flush()
         
-        r = requests.get(r.json()['next'])
+        while True:
+            retries = 0
+            while retries<3:
+                r = requests.get(next_url)
+                try:
+                    try:
+                        next_url = r.json()['next']
+                        activities = r.json()['results']
+                    except KeyError:
+                        break
+                    break
+                except json.decoder.JSONDecodeError:
+                    #If at first you don't succeed...
+                    print("Parse error on page %s ... Retrying..." % current_page)
+                    retries = retries + 1
+                    continue
+            if retries>=3:
+                print("Parse failure after 3 retries... Skipping page %s..." % current_page)
+                failed_pages.append(current_page)
+                next_url = next_url.replace(str(current_page),str(current_page+1))
+                current_page = current_page + 1
+                continue
+            else:
+                break
 
-    return(True) # TODO: exit the loop and notify that the process has run
+    return(failed_pages) # TODO: exit the loop and notify that the process has run
 
     
 def extract_activity(activity):
@@ -143,7 +187,7 @@ def extract_activity(activity):
             
     #Is there a default currency?
     try:
-        default_currency = [org['organisation']['default_currency'] for org in activity['reporting_organisations']][0]
+        default_currency = activity['aggregations']['activity']['budget_currency']
     except (KeyError,IndexError,TypeError):
         default_currency = ""
 
@@ -178,13 +222,13 @@ def extract_activity(activity):
             result['iati-identifier'] = ""
             
         try:
-            reporting_codes = ";".join([str(org['organisation']['organisation_identifier']) for org in activity['reporting_organisations']])
+            reporting_codes = ";".join([str(org['ref']) for org in activity['reporting_organisations']])
         except (KeyError,IndexError,TypeError):
             reporting_codes = ""
         result['reporting-org_ref'] = reporting_codes
         
         try:
-            reporting_names = ";".join([str(org['organisation']['primary_name']) for org in activity['reporting_organisations']])
+            reporting_names = ";".join([str(org['narratives'][0]['text']) for org in activity['reporting_organisations']])
         except (KeyError,IndexError,TypeError):
             reporting_names = ""
         result['reporting-org_name'] = reporting_names
@@ -258,7 +302,7 @@ def extract_activity(activity):
                 recipient_codes = ";".join(recipient_country_codes)
                 recipient_percentages = ";".join([str(perc) for perc in recipient_country_percentages])
             else:
-                recipient_percentages = ";".join(recipient_percentages_concat)
+                recipient_percentages = ";".join([str(perc) for perc in recipient_percentages_concat])
                 recipient_names_concat = recipient_country_names+recipient_region_names
                 recipient_names = ";".join(recipient_names_concat)
                 recipient_codes_concat = recipient_country_codes+recipient_region_codes
